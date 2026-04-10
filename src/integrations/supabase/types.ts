@@ -14,7 +14,75 @@ export type Database = {
   }
   public: {
     Tables: {
-      [_ in never]: never
+      user_api_keys: {
+        Row: {
+          api_key: string
+          api_secret: string
+          created_at: string
+          exchange: string
+          id: string
+          label: string | null
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          api_key: string
+          api_secret: string
+          created_at?: string
+          exchange: string
+          id?: string
+          label?: string | null
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          api_key?: string
+          api_secret?: string
+          created_at?: string
+          exchange?: string
+          id?: string
+          label?: string | null
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
+      user_telegram_settings: {
+        Row: {
+          bot_token: string
+          chat_id: string
+          created_at: string
+          id: string
+          notify_pattern_complete: boolean
+          notify_strong_signal: boolean
+          notify_tp_reached: boolean
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          bot_token: string
+          chat_id: string
+          created_at?: string
+          id?: string
+          notify_pattern_complete?: boolean
+          notify_strong_signal?: boolean
+          notify_tp_reached?: boolean
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          bot_token?: string
+          chat_id?: string
+          created_at?: string
+          id?: string
+          notify_pattern_complete?: boolean
+          notify_strong_signal?: boolean
+          notify_tp_reached?: boolean
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
     }
     Views: {
       [_ in never]: never

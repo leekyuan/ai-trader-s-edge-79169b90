@@ -1,6 +1,9 @@
-import { Bot, TrendingUp, Shield, Bell, Settings, Key, Send } from 'lucide-react';
+import { useState } from 'react';
+import { Bot, TrendingUp, Shield, Bell, Key, Send } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
+import { ExchangeSettingsModal } from './ExchangeSettingsModal';
+import { TelegramSettingsModal } from './TelegramSettingsModal';
 
 interface AISidebarProps {
   symbol: string;
@@ -8,6 +11,9 @@ interface AISidebarProps {
 }
 
 export function AISidebar({ symbol, isGuest }: AISidebarProps) {
+  const [exchangeOpen, setExchangeOpen] = useState(false);
+  const [telegramOpen, setTelegramOpen] = useState(false);
+
   return (
     <div className="flex flex-col h-full">
       {/* Header */}
@@ -58,10 +64,10 @@ export function AISidebar({ symbol, isGuest }: AISidebarProps) {
           <div className="space-y-2">
             <h4 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">API 설정</h4>
             <div className="space-y-2">
-              <Button variant="outline" size="sm" className="w-full justify-start text-xs gap-2">
+              <Button variant="outline" size="sm" className="w-full justify-start text-xs gap-2" onClick={() => setExchangeOpen(true)} disabled={isGuest}>
                 <Key className="h-3.5 w-3.5" /> 거래소 API 연결
               </Button>
-              <Button variant="outline" size="sm" className="w-full justify-start text-xs gap-2">
+              <Button variant="outline" size="sm" className="w-full justify-start text-xs gap-2" onClick={() => setTelegramOpen(true)} disabled={isGuest}>
                 <Send className="h-3.5 w-3.5" /> Telegram 봇 설정
               </Button>
             </div>
@@ -92,6 +98,9 @@ export function AISidebar({ symbol, isGuest }: AISidebarProps) {
           </p>
         </div>
       )}
+
+      <ExchangeSettingsModal open={exchangeOpen} onOpenChange={setExchangeOpen} />
+      <TelegramSettingsModal open={telegramOpen} onOpenChange={setTelegramOpen} />
     </div>
   );
 }
