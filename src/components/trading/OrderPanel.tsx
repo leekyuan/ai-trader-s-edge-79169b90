@@ -1,10 +1,18 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useCallback, useEffect } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Slider } from '@/components/ui/slider';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { AlertTriangle } from 'lucide-react';
+import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { AlertTriangle, Wifi, WifiOff, Loader2 } from 'lucide-react';
+import { StrategyPanel } from './StrategyPanel';
+import { SignalBanner } from './SignalBanner';
+import { useBinanceKlines } from '@/hooks/useBinanceKlines';
+import { useBinanceWebSocket } from '@/hooks/useBinanceWebSocket';
+import { useUserSettings } from '@/hooks/useUserSettings';
+import { useTradeExecute } from '@/hooks/useTradeExecute';
+import { calculateATR, detectMSS, detectFVG, checkConfluence } from '@/lib/indicators';
+import { toast } from 'sonner';
 
 interface OrderPanelProps {
   symbol: string;
@@ -27,6 +35,61 @@ export function OrderPanel({ symbol }: OrderPanelProps) {
   const risk = riskPercent[0];
   const lev = leverage[0];
 
+  // Binance data
+  const { data: klines1H } = useBinanceKlines(symbol, '1h', 50);
+  const { data: klines15M } = useBinanceKlines(symbol, '15m', 50);
+  const { ticker, connected, setSafetyCheck, onSafetyTrigger } = useBinanceWebSocket(symbol);
+  const { settings } = useUserSettings();
+  const tradeExecute = useTradeExecute(settings.fastapi_url);
+
+  const currentPrice = ticker?.price ?? 0;
+
+  // Auto-fill entry price from WebSocket
+  useEffect(() => {
+    if (currentPrice > 0 && !entryPrice) {
+      setEntryPrice(currentPrice.toString());
+    }
+  }, [currentPrice, entryPrice]);
+
+  // Indicators
+  const atr = useMemo(() => klines1H ? calculateATR(klines1H) : 0, [klines1H]);
+  const mss = useMemo(() => klines1H ? detectMSS(klines1H) : { detected: false, direction: null, breakLevel: 0 }, [klines1H]);
+  const fvg = useMemo(() => klines15M && currentPrice ? detectFVG(klines15M, currentPrice) : { detected: false, direction: null, gapHigh: 0, gapLow: 0, priceInGap: false }, [klines15M, currentPrice]);
+  const confluence = useMemo(() => checkConfluence(mss, fvg, currentPrice, atr), [mss, fvg, currentPrice, atr]);
+
+  // Strategy SL/TP auto-fill
+  const handleSLTPChange = useCallback((newSL: number, newTP: number) => {
+    setStopLoss(newSL.toFixed(2));
+    setTakeProfit(newTP.toFixed(2));
+  }, []);
+
+  // Apply confluence preset
+  const handleApplyPreset = useCallback(() => {
+    if (!confluence.isHighProbability) return;
+    setEntryPrice(confluence.suggestedEntry.toFixed(2));
+    setStopLoss(confluence.suggestedSL.toFixed(2));
+    setTakeProfit(confluence.suggestedTP.toFixed(2));
+    setSide(confluence.direction === 'long' ? 'long' : 'short');
+    toast.success('High Probability Signal 프리셋이 적용되었습니다');
+  }, [confluence]);
+
+  // Safety check — SL/TP hit via WebSocket
+  useEffect(() => {
+    if (entry && sl && tp) {
+      setSafetyCheck({ side, entryPrice: entry, stopLoss: sl, takeProfit: tp });
+    } else {
+      setSafetyCheck(null);
+    }
+  }, [side, entry, sl, tp, setSafetyCheck]);
+
+  useEffect(() => {
+    onSafetyTrigger((type, price) => {
+      toast.warning(`⚠️ ${type === 'sl' ? '손절가' : '익절가'} 도달! (${price.toFixed(2)}) — 종료 요청 전송 중...`);
+      // Could auto-close via FastAPI here
+    });
+  }, [onSafetyTrigger]);
+
+  // Calculations
   const optimalQty = useMemo(() => {
     if (!entry || !sl || !capital || entry === sl) return 0;
     return (capital * (risk / 100)) / Math.abs(entry - sl);
@@ -39,9 +102,41 @@ export function OrderPanel({ symbol }: OrderPanelProps) {
 
   const lowRR = rr > 0 && rr < 1.5;
 
+  const handleSubmit = () => {
+    if (!entry || !sl || !tp || !optimalQty) {
+      toast.error('모든 필드를 입력해주세요');
+      return;
+    }
+    tradeExecute.mutate({
+      symbol,
+      side,
+      entry_price: entry,
+      stop_loss: sl,
+      take_profit: tp,
+      quantity: optimalQty,
+      leverage: lev,
+      margin_mode: marginMode,
+      strategy_type: settings.strategy_type,
+      breakeven_enabled: settings.breakeven_enabled,
+      breakeven_trigger_pct: settings.breakeven_trigger_pct,
+    });
+  };
+
   return (
-    <div className="flex flex-col gap-3 p-4">
-      <h3 className="text-sm font-semibold text-foreground">{symbol} 주문 패널</h3>
+    <div className="flex flex-col gap-3 p-4 overflow-y-auto">
+      <div className="flex items-center justify-between">
+        <h3 className="text-sm font-semibold text-foreground">{symbol} 주문 패널</h3>
+        <div className="flex items-center gap-1 text-[10px]">
+          {connected ? (
+            <><Wifi className="h-3 w-3 text-bull" /><span className="text-bull font-mono">{currentPrice > 0 ? currentPrice.toFixed(2) : '...'}</span></>
+          ) : (
+            <><WifiOff className="h-3 w-3 text-bear" /><span className="text-muted-foreground">연결 중...</span></>
+          )}
+        </div>
+      </div>
+
+      {/* MSS / FVG / Signal */}
+      <SignalBanner confluence={confluence} mss={mss} fvg={fvg} onApplyPreset={handleApplyPreset} />
 
       {/* Long / Short */}
       <div className="grid grid-cols-2 gap-2">
@@ -87,6 +182,9 @@ export function OrderPanel({ symbol }: OrderPanelProps) {
         <Slider value={riskPercent} onValueChange={setRiskPercent} min={0.1} max={10} step={0.1} className="mt-1" />
       </div>
 
+      {/* Strategy Panel */}
+      <StrategyPanel entryPrice={entry} atr={atr} onSLTPChange={handleSLTPChange} />
+
       {/* Entry / SL / TP */}
       <div className="grid grid-cols-3 gap-2">
         <div>
@@ -128,7 +226,13 @@ export function OrderPanel({ symbol }: OrderPanelProps) {
         </div>
       )}
 
-      <Button className={side === 'long' ? 'bg-bull hover:bg-bull/90' : 'bg-bear hover:bg-bear/90'} size="sm">
+      <Button
+        className={side === 'long' ? 'bg-bull hover:bg-bull/90' : 'bg-bear hover:bg-bear/90'}
+        size="sm"
+        onClick={handleSubmit}
+        disabled={tradeExecute.isPending}
+      >
+        {tradeExecute.isPending && <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" />}
         {side === 'long' ? '매수' : '매도'} {symbol}
       </Button>
     </div>

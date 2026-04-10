@@ -47,6 +47,48 @@ export type Database = {
         }
         Relationships: []
       }
+      user_settings: {
+        Row: {
+          atr_sl_multiplier: number
+          atr_tp_multiplier: number
+          breakeven_enabled: boolean
+          breakeven_trigger_pct: number
+          created_at: string
+          fastapi_url: string | null
+          id: string
+          rr_ratio: number
+          strategy_type: string
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          atr_sl_multiplier?: number
+          atr_tp_multiplier?: number
+          breakeven_enabled?: boolean
+          breakeven_trigger_pct?: number
+          created_at?: string
+          fastapi_url?: string | null
+          id?: string
+          rr_ratio?: number
+          strategy_type?: string
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          atr_sl_multiplier?: number
+          atr_tp_multiplier?: number
+          breakeven_enabled?: boolean
+          breakeven_trigger_pct?: number
+          created_at?: string
+          fastapi_url?: string | null
+          id?: string
+          rr_ratio?: number
+          strategy_type?: string
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
       user_telegram_settings: {
         Row: {
           bot_token: string
