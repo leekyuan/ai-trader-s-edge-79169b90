@@ -65,21 +65,23 @@ export function TelegramSettingsModal({ open, onOpenChange }: TelegramSettingsMo
     }
 
     setLoading(true);
-    const payload: Record<string, unknown> = {
+    const payload = {
       user_id: user.id,
+      bot_token: botToken !== '••••••••' ? btoa(botToken) : undefined,
       chat_id: chatId,
       notify_strong_signal: notifyStrongSignal,
       notify_tp_reached: notifyTpReached,
       notify_pattern_complete: notifyPatternComplete,
     };
 
-    if (botToken !== '••••••••') {
-      payload.bot_token = btoa(botToken);
-    }
+    // Remove undefined bot_token for update case
+    const cleanPayload = Object.fromEntries(
+      Object.entries(payload).filter(([_, v]) => v !== undefined)
+    );
 
     const { error } = await supabase
       .from('user_telegram_settings')
-      .upsert(payload, { onConflict: 'user_id' });
+      .upsert(cleanPayload as any, { onConflict: 'user_id' });
 
     setLoading(false);
     if (error) {
