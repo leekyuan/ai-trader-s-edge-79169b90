@@ -6,6 +6,8 @@ import { OrderPanel } from '@/components/trading/OrderPanel';
 import { AISidebar } from '@/components/trading/AISidebar';
 import { AuthModal } from '@/components/trading/AuthModal';
 import { TopBar } from '@/components/trading/TopBar';
+import { BotControlPanel } from '@/components/trading/BotControlPanel';
+import { PositionManager } from '@/components/trading/PositionManager';
 import { cn } from '@/lib/utils';
 
 const Index = () => {
@@ -30,7 +32,7 @@ const Index = () => {
           <TradingChart symbol={selectedCoin} />
         </div>
 
-        {/* Right panel: Order + AI */}
+        {/* Right panel: Order + Bot + Position + AI */}
         <div className="flex flex-col sm:flex-row lg:flex-col lg:w-[340px] overflow-y-auto border-border">
           {/* Order Panel */}
           <div className={cn(
@@ -38,7 +40,15 @@ const Index = () => {
             isGuest && 'blur-locked'
           )}>
             <OrderPanel symbol={selectedCoin} />
+            <PositionManager />
           </div>
+
+          {/* Bot Control (logged-in only) */}
+          {!isGuest && (
+            <div className="border-b border-border">
+              <BotControlPanel />
+            </div>
+          )}
 
           {/* AI Sidebar */}
           <div className="flex-1 min-h-[200px]">
