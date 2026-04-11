@@ -14,6 +14,105 @@ export type Database = {
   }
   public: {
     Tables: {
+      backtest_results: {
+        Row: {
+          created_at: string
+          id: string
+          max_drawdown: number
+          pair: string
+          params: Json
+          period_days: number
+          total_return: number
+          total_trades: number
+          trades: Json
+          user_id: string
+          win_rate: number
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          max_drawdown?: number
+          pair: string
+          params?: Json
+          period_days: number
+          total_return?: number
+          total_trades?: number
+          trades?: Json
+          user_id: string
+          win_rate?: number
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          max_drawdown?: number
+          pair?: string
+          params?: Json
+          period_days?: number
+          total_return?: number
+          total_trades?: number
+          trades?: Json
+          user_id?: string
+          win_rate?: number
+        }
+        Relationships: []
+      }
+      trade_logs: {
+        Row: {
+          closed_at: string | null
+          created_at: string
+          direction: string
+          entry_price: number
+          exit_price: number | null
+          id: string
+          leverage: number
+          pair: string
+          pnl_pct: number | null
+          pnl_usdt: number | null
+          quantity: number
+          signal_type: string
+          sl: number
+          status: string
+          tp: number
+          user_id: string
+        }
+        Insert: {
+          closed_at?: string | null
+          created_at?: string
+          direction: string
+          entry_price: number
+          exit_price?: number | null
+          id?: string
+          leverage?: number
+          pair: string
+          pnl_pct?: number | null
+          pnl_usdt?: number | null
+          quantity?: number
+          signal_type?: string
+          sl: number
+          status?: string
+          tp: number
+          user_id: string
+        }
+        Update: {
+          closed_at?: string | null
+          created_at?: string
+          direction?: string
+          entry_price?: number
+          exit_price?: number | null
+          id?: string
+          leverage?: number
+          pair?: string
+          pnl_pct?: number | null
+          pnl_usdt?: number | null
+          quantity?: number
+          signal_type?: string
+          sl?: number
+          status?: string
+          tp?: number
+          user_id?: string
+        }
+        Relationships: []
+      }
       user_api_keys: {
         Row: {
           api_key: string
