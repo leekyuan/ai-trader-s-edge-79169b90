@@ -1,5 +1,16 @@
 import type { Kline } from '@/hooks/useBinanceKlines';
 
+/** EMA (Exponential Moving Average) */
+export function calculateEMA(klines: Kline[], period = 200): number[] {
+  if (klines.length === 0) return [];
+  const k = 2 / (period + 1);
+  const emas: number[] = [klines[0].close];
+  for (let i = 1; i < klines.length; i++) {
+    emas.push(klines[i].close * k + emas[i - 1] * (1 - k));
+  }
+  return emas;
+}
+
 /** ATR (Average True Range) */
 export function calculateATR(klines: Kline[], period = 14): number {
   if (klines.length < period + 1) return 0;

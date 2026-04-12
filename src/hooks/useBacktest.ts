@@ -1,7 +1,7 @@
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from './useAuth';
-import { calculateATR, detectMSS, detectFVG, checkConfluence } from '@/lib/indicators';
+import { calculateATR, calculateEMA, detectMSS, detectFVG, checkConfluence } from '@/lib/indicators';
 
 interface BacktestParams {
   pair: string;
@@ -9,6 +9,7 @@ interface BacktestParams {
   leverage: number;
   rrRatio: number;
   riskPercent: number;
+  trendFilterEnabled: boolean;
 }
 
 async function fetchKlines(symbol: string, interval: string, limit: number, endTime?: number) {
@@ -31,15 +32,19 @@ export function useRunBacktest() {
 
   return useMutation({
     mutationFn: async (params: BacktestParams) => {
-      const { pair, periodDays, leverage, rrRatio, riskPercent } = params;
+      const { pair, periodDays, leverage, rrRatio, riskPercent, trendFilterEnabled } = params;
 
       // Fetch historical klines
       const hoursNeeded = periodDays * 24;
       const klines1H = await fetchKlines(pair, '1h', Math.min(hoursNeeded, 1000));
       const klines15M = await fetchKlines(pair, '15m', Math.min(hoursNeeded * 4, 1000));
 
+      // Calculate 200 EMA on 1H candles
+      const ema200 = calculateEMA(klines1H, 200);
+
       // Simulate trades
       const trades: any[] = [];
+      let filteredOutSignals = 0;
       const capital = 10000;
 
       for (let i = 50; i < klines1H.length; i++) {
@@ -58,6 +63,19 @@ export function useRunBacktest() {
         const confluence = checkConfluence(mss, fvg, currentPrice, atr);
 
         if (!confluence.isHighProbability) continue;
+
+        // Trend filter: check 200 EMA
+        if (trendFilterEnabled) {
+          const currentEma = ema200[i];
+          if (confluence.direction === 'long' && currentPrice < currentEma) {
+            filteredOutSignals++;
+            continue;
+          }
+          if (confluence.direction === 'short' && currentPrice > currentEma) {
+            filteredOutSignals++;
+            continue;
+          }
+        }
 
         const direction = confluence.direction;
         const entry = confluence.suggestedEntry;
@@ -114,13 +132,15 @@ export function useRunBacktest() {
       const result = {
         pair,
         period_days: periodDays,
-        params: { leverage, rrRatio, riskPercent },
+        params: { leverage, rrRatio, riskPercent, trendFilterEnabled },
         total_trades: trades.length,
         win_rate: trades.length > 0 ? parseFloat(((wins.length / trades.length) * 100).toFixed(1)) : 0,
         total_return: parseFloat(totalReturn.toFixed(2)),
         max_drawdown: parseFloat(mdd.toFixed(2)),
         trades,
         max_consec_loss: maxConsecLoss,
+        filtered_out_signals: filteredOutSignals,
+        trend_filter_active: trendFilterEnabled,
       };
 
       // Save to Supabase
