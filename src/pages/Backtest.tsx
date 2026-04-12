@@ -5,12 +5,13 @@ import { useBotStore } from '@/stores/useBotStore';
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
 import { Slider } from '@/components/ui/slider';
+import { Switch } from '@/components/ui/switch';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Badge } from '@/components/ui/badge';
 import { AuthModal } from '@/components/trading/AuthModal';
 import { TopBar } from '@/components/trading/TopBar';
 import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from 'recharts';
-import { ArrowLeft, Play, Zap } from 'lucide-react';
+import { ArrowLeft, Play, Zap, Filter } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
@@ -26,6 +27,7 @@ export default function Backtest() {
   const [leverage, setLeverage] = useState([5]);
   const [rrRatio, setRrRatio] = useState([2]);
   const [riskPercent, setRiskPercent] = useState([1]);
+  const [trendFilter, setTrendFilter] = useState(true);
 
   const backtest = useRunBacktest();
   const { setActivePairs } = useBotStore();
@@ -46,7 +48,7 @@ export default function Backtest() {
   }
 
   const run = () => {
-    backtest.mutate({ pair, periodDays: period, leverage: leverage[0], rrRatio: rrRatio[0], riskPercent: riskPercent[0] });
+    backtest.mutate({ pair, periodDays: period, leverage: leverage[0], rrRatio: rrRatio[0], riskPercent: riskPercent[0], trendFilterEnabled: trendFilter });
   };
 
   const applyToBot = () => {
@@ -117,6 +119,15 @@ export default function Backtest() {
               </div>
             </div>
 
+            {/* Trend Filter Toggle */}
+            <div className="flex items-center justify-between bg-muted/50 rounded-lg px-3 py-2">
+              <div className="flex items-center gap-2">
+                <Filter className="h-3.5 w-3.5 text-primary" />
+                <Label className="text-[11px] font-medium">Trend Filter (200 EMA)</Label>
+              </div>
+              <Switch checked={trendFilter} onCheckedChange={setTrendFilter} />
+            </div>
+
             <Button className="w-full" onClick={run} disabled={backtest.isPending}>
               {backtest.isPending ? (
                 <div className="flex items-center gap-2"><Skeleton className="h-4 w-4 rounded-full" /> 분석 중...</div>
@@ -130,12 +141,13 @@ export default function Backtest() {
           {result && (
             <div className="space-y-4">
               {/* KPI Cards */}
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+              <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
                 {[
                   { label: '총 거래수', value: result.total_trades.toString() },
                   { label: '승률', value: `${result.win_rate}%`, color: result.win_rate >= 50 ? 'price-up' : 'price-down' },
                   { label: '총 수익률', value: `${result.total_return >= 0 ? '+' : ''}${result.total_return}%`, color: result.total_return >= 0 ? 'price-up' : 'price-down' },
                   { label: '최대 연속 손실', value: result.max_consec_loss?.toString() || '0' },
+                  ...(result.trend_filter_active ? [{ label: '필터링된 신호', value: result.filtered_out_signals?.toString() || '0', color: 'text-amber-400' }] : []),
                 ].map((kpi, i) => (
                   <div key={i} className="bg-card border border-border rounded-lg p-3 text-center">
                     <p className="text-[10px] text-muted-foreground">{kpi.label}</p>
@@ -154,7 +166,7 @@ export default function Backtest() {
                       <XAxis dataKey="date" tick={{ fontSize: 10, fill: 'hsl(var(--muted-foreground))' }} />
                       <YAxis tick={{ fontSize: 10, fill: 'hsl(var(--muted-foreground))' }} />
                       <Tooltip contentStyle={{ background: 'hsl(var(--card))', border: '1px solid hsl(var(--border))', borderRadius: 8, fontSize: 12 }} />
-                      <Line type="monotone" dataKey="cumulative" stroke="hsl(var(--primary))" strokeWidth={2} dot={false} />
+                      <Line type="monotone" dataKey="cumulative" stroke={result.trend_filter_active ? 'hsl(150, 80%, 50%)' : 'hsl(var(--primary))'} strokeWidth={2} dot={false} />
                     </LineChart>
                   </ResponsiveContainer>
                 </div>
