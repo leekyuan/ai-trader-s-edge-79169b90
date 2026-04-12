@@ -12,12 +12,24 @@ interface BacktestParams {
   trendFilterEnabled: boolean;
   volFilterEnabled: boolean;
   volFilterMultiplier: number;
+  volumeFilterEnabled: boolean;
+  volumeThreshold: number;
+  mtfFilterEnabled: boolean;
+  higherTimeframe: string;
 }
 
-async function fetchKlines(symbol: string, interval: string, limit: number, endTime?: number) {
+interface KlineWithVolume {
+  open: number;
+  high: number;
+  low: number;
+  close: number;
+  volume: number;
+  time: number;
+}
+
+async function fetchKlinesWithVolume(symbol: string, interval: string, limit: number): Promise<KlineWithVolume[]> {
   const pair = `${symbol.toUpperCase()}USDT`;
-  let url = `https://api.binance.com/api/v3/klines?symbol=${pair}&interval=${interval}&limit=${limit}`;
-  if (endTime) url += `&endTime=${endTime}`;
+  const url = `https://api.binance.com/api/v3/klines?symbol=${pair}&interval=${interval}&limit=${limit}`;
   const res = await fetch(url);
   const data = await res.json();
   return data.map((k: any) => ({
@@ -25,6 +37,7 @@ async function fetchKlines(symbol: string, interval: string, limit: number, endT
     high: parseFloat(k[2]),
     low: parseFloat(k[3]),
     close: parseFloat(k[4]),
+    volume: parseFloat(k[5]),
     time: k[0],
   }));
 }
@@ -34,26 +47,35 @@ export function useRunBacktest() {
 
   return useMutation({
     mutationFn: async (params: BacktestParams) => {
-      const { pair, periodDays, leverage, rrRatio, riskPercent, trendFilterEnabled, volFilterEnabled, volFilterMultiplier } = params;
+      const {
+        pair, periodDays, leverage, rrRatio, riskPercent,
+        trendFilterEnabled, volFilterEnabled, volFilterMultiplier,
+        volumeFilterEnabled, volumeThreshold,
+        mtfFilterEnabled, higherTimeframe,
+      } = params;
 
-      // Fetch historical klines
       const hoursNeeded = periodDays * 24;
-      const klines1H = await fetchKlines(pair, '1h', Math.min(hoursNeeded, 1000));
-      const klines15M = await fetchKlines(pair, '15m', Math.min(hoursNeeded * 4, 1000));
+      const klines1H = await fetchKlinesWithVolume(pair, '1h', Math.min(hoursNeeded, 1000));
+      const klines15M = await fetchKlinesWithVolume(pair, '15m', Math.min(hoursNeeded * 4, 1000));
+
+      // Fetch higher timeframe data for MTF filter
+      let klinesHTF: KlineWithVolume[] = [];
+      if (mtfFilterEnabled) {
+        const htfLimitMap: Record<string, number> = { '4h': Math.min(periodDays * 6, 1000), '1d': Math.min(periodDays, 1000), '1w': Math.min(Math.ceil(periodDays / 7), 500) };
+        klinesHTF = await fetchKlinesWithVolume(pair, higherTimeframe, htfLimitMap[higherTimeframe] || 200);
+      }
+
+      // Pre-compute EMA50 on higher timeframe
+      const htfEma50 = mtfFilterEnabled && klinesHTF.length > 0 ? calculateEMA(klinesHTF as any, 50) : [];
 
       // Calculate 200 EMA on 1H candles
-      const ema200 = calculateEMA(klines1H, 200);
+      const ema200 = calculateEMA(klines1H as any, 200);
 
-      // Calculate ATR series for volatility filter & chart
-      const atrSeries: { date: string; atr: number; atrAvg: number }[] = [];
+      // Pre-compute all ATR values
       const atrWindow = 14;
       const atrAvgWindow = 20;
-      // Pre-compute all ATR values
-      const allAtrs: number[] = [];
+      const allAtrs: number[] = [0];
       for (let i = 1; i < klines1H.length; i++) {
-        const prev = klines1H[i - 1];
-        const curr = klines1H[i];
-        const tr = Math.max(curr.high - curr.low, Math.abs(curr.high - prev.close), Math.abs(curr.low - prev.close));
         if (i < atrWindow) { allAtrs.push(0); continue; }
         const slice = [];
         for (let j = Math.max(1, i - atrWindow + 1); j <= i; j++) {
@@ -62,10 +84,9 @@ export function useRunBacktest() {
         }
         allAtrs.push(slice.reduce((a, b) => a + b, 0) / slice.length);
       }
-      // Insert a 0 at index 0 to align with klines1H indices
-      allAtrs.unshift(0);
 
-      // Build ATR series with rolling average
+      // Build ATR series
+      const atrSeries: { date: string; atr: number; atrAvg: number }[] = [];
       for (let i = atrWindow; i < klines1H.length; i++) {
         const currentAtr = allAtrs[i];
         const avgSlice = allAtrs.slice(Math.max(0, i - atrAvgWindow + 1), i + 1).filter(v => v > 0);
@@ -77,49 +98,79 @@ export function useRunBacktest() {
         });
       }
 
+      // Pre-compute 20-period average volume for 1H
+      const volAvg20 = (idx: number): number => {
+        const start = Math.max(0, idx - 19);
+        const slice = klines1H.slice(start, idx + 1);
+        return slice.reduce((s, k) => s + k.volume, 0) / slice.length;
+      };
+
       // Simulate trades
       const trades: any[] = [];
       let filteredOutSignals = 0;
       let volFilteredSignals = 0;
-      const capital = 10000;
+      let volumeFilteredSignals = 0;
+      let mtfFilteredSignals = 0;
+      let mtfAlignedCount = 0;
+      let mtfTotalChecked = 0;
 
       for (let i = 50; i < klines1H.length; i++) {
         const slice1H = klines1H.slice(Math.max(0, i - 50), i + 1);
         const currentPrice = klines1H[i].close;
 
-        // Find matching 15M candles
         const time1H = klines1H[i].time;
-        const slice15M = klines15M.filter((k: any) => k.time <= time1H && k.time > time1H - 15 * 60 * 1000 * 50);
-
+        const slice15M = klines15M.filter((k) => k.time <= time1H && k.time > time1H - 15 * 60 * 1000 * 50);
         if (slice15M.length < 10) continue;
 
-        const atr = calculateATR(slice1H);
-        const mss = detectMSS(slice1H);
-        const fvg = detectFVG(slice15M, currentPrice);
+        const atr = calculateATR(slice1H as any);
+        const mss = detectMSS(slice1H as any);
+        const fvg = detectFVG(slice15M as any, currentPrice);
         const confluence = checkConfluence(mss, fvg, currentPrice, atr);
-
         if (!confluence.isHighProbability) continue;
 
-        // Trend filter: check 200 EMA
+        // Trend filter
         if (trendFilterEnabled) {
           const currentEma = ema200[i];
-          if (confluence.direction === 'long' && currentPrice < currentEma) {
-            filteredOutSignals++;
-            continue;
-          }
-          if (confluence.direction === 'short' && currentPrice > currentEma) {
-            filteredOutSignals++;
-            continue;
-          }
+          if (confluence.direction === 'long' && currentPrice < currentEma) { filteredOutSignals++; continue; }
+          if (confluence.direction === 'short' && currentPrice > currentEma) { filteredOutSignals++; continue; }
         }
 
         // Volatility filter
         if (volFilterEnabled && allAtrs[i] > 0) {
           const avgSlice = allAtrs.slice(Math.max(0, i - atrAvgWindow + 1), i + 1).filter(v => v > 0);
           const atrAvg = avgSlice.length > 0 ? avgSlice.reduce((a, b) => a + b, 0) / avgSlice.length : allAtrs[i];
-          if (allAtrs[i] < atrAvg * volFilterMultiplier) {
-            volFilteredSignals++;
-            continue;
+          if (allAtrs[i] < atrAvg * volFilterMultiplier) { volFilteredSignals++; continue; }
+        }
+
+        // Volume confirmation filter
+        const currentVolume = klines1H[i].volume;
+        const avgVol = volAvg20(i);
+        const volRatio = avgVol > 0 ? parseFloat((currentVolume / avgVol).toFixed(2)) : 1;
+
+        if (volumeFilterEnabled) {
+          if (volRatio < volumeThreshold) { volumeFilteredSignals++; continue; }
+        }
+
+        // Multi-timeframe filter
+        if (mtfFilterEnabled && klinesHTF.length > 0 && htfEma50.length > 0) {
+          mtfTotalChecked++;
+          // Find the most recent HTF candle at or before this 1H candle time
+          let htfIdx = -1;
+          for (let h = klinesHTF.length - 1; h >= 0; h--) {
+            if (klinesHTF[h].time <= time1H) { htfIdx = h; break; }
+          }
+          if (htfIdx >= 0 && htfIdx < htfEma50.length) {
+            const htfPrice = klinesHTF[htfIdx].close;
+            const htfEma = htfEma50[htfIdx];
+            const htfBullish = htfPrice > htfEma;
+            const htfBearish = htfPrice < htfEma;
+            const aligned = (confluence.direction === 'long' && htfBullish) || (confluence.direction === 'short' && htfBearish);
+            if (aligned) {
+              mtfAlignedCount++;
+            } else {
+              mtfFilteredSignals++;
+              continue;
+            }
           }
         }
 
@@ -128,10 +179,8 @@ export function useRunBacktest() {
         const sl = confluence.suggestedSL;
         const tp = confluence.suggestedTP;
 
-        // Simulate forward
         let result = 'loss';
         let exitPrice = sl;
-
         for (let j = i + 1; j < Math.min(i + 48, klines1H.length); j++) {
           const candle = klines1H[j];
           if (direction === 'long') {
@@ -154,31 +203,30 @@ export function useRunBacktest() {
           exit: exitPrice.toFixed(2),
           result,
           pnl_pct: parseFloat(pnlPct.toFixed(2)),
+          vol_ratio: volRatio,
         });
       }
 
       const wins = trades.filter(t => t.result === 'win');
+      const losses = trades.filter(t => t.result === 'loss');
       const totalReturn = trades.reduce((s, t) => s + t.pnl_pct, 0);
 
-      let peak = 0, mdd = 0, cum = 0;
-      trades.forEach(t => {
-        cum += t.pnl_pct;
-        if (cum > peak) peak = cum;
-        const dd = peak - cum;
-        if (dd > mdd) mdd = dd;
-      });
+      // Volume ratio stats
+      const avgVolRatioWins = wins.length > 0 ? parseFloat((wins.reduce((s: number, t: any) => s + t.vol_ratio, 0) / wins.length).toFixed(2)) : 0;
+      const avgVolRatioLosses = losses.length > 0 ? parseFloat((losses.reduce((s: number, t: any) => s + t.vol_ratio, 0) / losses.length).toFixed(2)) : 0;
 
-      // Max consecutive losses
+      let peak = 0, mdd = 0, cum = 0;
+      trades.forEach(t => { cum += t.pnl_pct; if (cum > peak) peak = cum; const dd = peak - cum; if (dd > mdd) mdd = dd; });
+
       let maxConsecLoss = 0, consecLoss = 0;
-      trades.forEach(t => {
-        if (t.result === 'loss') { consecLoss++; maxConsecLoss = Math.max(maxConsecLoss, consecLoss); }
-        else consecLoss = 0;
-      });
+      trades.forEach(t => { if (t.result === 'loss') { consecLoss++; maxConsecLoss = Math.max(maxConsecLoss, consecLoss); } else consecLoss = 0; });
+
+      const mtfAlignmentRate = mtfTotalChecked > 0 ? parseFloat(((mtfAlignedCount / mtfTotalChecked) * 100).toFixed(1)) : 0;
 
       const result = {
         pair,
         period_days: periodDays,
-        params: { leverage, rrRatio, riskPercent, trendFilterEnabled, volFilterEnabled, volFilterMultiplier },
+        params: { leverage, rrRatio, riskPercent, trendFilterEnabled, volFilterEnabled, volFilterMultiplier, volumeFilterEnabled, volumeThreshold, mtfFilterEnabled, higherTimeframe },
         total_trades: trades.length,
         win_rate: trades.length > 0 ? parseFloat(((wins.length / trades.length) * 100).toFixed(1)) : 0,
         total_return: parseFloat(totalReturn.toFixed(2)),
@@ -190,19 +238,21 @@ export function useRunBacktest() {
         vol_filtered_signals: volFilteredSignals,
         vol_filter_active: volFilterEnabled,
         atr_series: atrSeries,
+        volume_filtered_signals: volumeFilteredSignals,
+        volume_filter_active: volumeFilterEnabled,
+        avg_vol_ratio_wins: avgVolRatioWins,
+        avg_vol_ratio_losses: avgVolRatioLosses,
+        mtf_filtered_signals: mtfFilteredSignals,
+        mtf_filter_active: mtfFilterEnabled,
+        mtf_alignment_rate: mtfAlignmentRate,
       };
 
-      // Save to Supabase
       if (user) {
         await supabase.from('backtest_results').insert({
-          user_id: user.id,
-          pair,
-          period_days: periodDays,
-          params: { leverage, rrRatio, riskPercent } as any,
-          total_trades: result.total_trades,
-          win_rate: result.win_rate,
-          total_return: result.total_return,
-          max_drawdown: result.max_drawdown,
+          user_id: user.id, pair, period_days: periodDays,
+          params: result.params as any,
+          total_trades: result.total_trades, win_rate: result.win_rate,
+          total_return: result.total_return, max_drawdown: result.max_drawdown,
           trades: result.trades as any,
         });
       }
@@ -217,11 +267,7 @@ export function useBacktestHistory() {
   return useQuery({
     queryKey: ['backtest-history', user?.id],
     queryFn: async () => {
-      const { data, error } = await supabase
-        .from('backtest_results')
-        .select('*')
-        .order('created_at', { ascending: false })
-        .limit(10);
+      const { data, error } = await supabase.from('backtest_results').select('*').order('created_at', { ascending: false }).limit(10);
       if (error) throw error;
       return data;
     },
