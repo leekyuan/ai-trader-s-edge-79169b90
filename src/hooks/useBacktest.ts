@@ -10,6 +10,8 @@ interface BacktestParams {
   rrRatio: number;
   riskPercent: number;
   trendFilterEnabled: boolean;
+  volFilterEnabled: boolean;
+  volFilterMultiplier: number;
 }
 
 async function fetchKlines(symbol: string, interval: string, limit: number, endTime?: number) {
@@ -32,7 +34,7 @@ export function useRunBacktest() {
 
   return useMutation({
     mutationFn: async (params: BacktestParams) => {
-      const { pair, periodDays, leverage, rrRatio, riskPercent, trendFilterEnabled } = params;
+      const { pair, periodDays, leverage, rrRatio, riskPercent, trendFilterEnabled, volFilterEnabled, volFilterMultiplier } = params;
 
       // Fetch historical klines
       const hoursNeeded = periodDays * 24;
@@ -42,9 +44,43 @@ export function useRunBacktest() {
       // Calculate 200 EMA on 1H candles
       const ema200 = calculateEMA(klines1H, 200);
 
+      // Calculate ATR series for volatility filter & chart
+      const atrSeries: { date: string; atr: number; atrAvg: number }[] = [];
+      const atrWindow = 14;
+      const atrAvgWindow = 20;
+      // Pre-compute all ATR values
+      const allAtrs: number[] = [];
+      for (let i = 1; i < klines1H.length; i++) {
+        const prev = klines1H[i - 1];
+        const curr = klines1H[i];
+        const tr = Math.max(curr.high - curr.low, Math.abs(curr.high - prev.close), Math.abs(curr.low - prev.close));
+        if (i < atrWindow) { allAtrs.push(0); continue; }
+        const slice = [];
+        for (let j = Math.max(1, i - atrWindow + 1); j <= i; j++) {
+          const p2 = klines1H[j - 1]; const c2 = klines1H[j];
+          slice.push(Math.max(c2.high - c2.low, Math.abs(c2.high - p2.close), Math.abs(c2.low - p2.close)));
+        }
+        allAtrs.push(slice.reduce((a, b) => a + b, 0) / slice.length);
+      }
+      // Insert a 0 at index 0 to align with klines1H indices
+      allAtrs.unshift(0);
+
+      // Build ATR series with rolling average
+      for (let i = atrWindow; i < klines1H.length; i++) {
+        const currentAtr = allAtrs[i];
+        const avgSlice = allAtrs.slice(Math.max(0, i - atrAvgWindow + 1), i + 1).filter(v => v > 0);
+        const atrAvg = avgSlice.length > 0 ? avgSlice.reduce((a, b) => a + b, 0) / avgSlice.length : currentAtr;
+        atrSeries.push({
+          date: new Date(klines1H[i].time).toISOString().split('T')[0],
+          atr: parseFloat(currentAtr.toFixed(2)),
+          atrAvg: parseFloat((atrAvg * volFilterMultiplier).toFixed(2)),
+        });
+      }
+
       // Simulate trades
       const trades: any[] = [];
       let filteredOutSignals = 0;
+      let volFilteredSignals = 0;
       const capital = 10000;
 
       for (let i = 50; i < klines1H.length; i++) {
@@ -73,6 +109,16 @@ export function useRunBacktest() {
           }
           if (confluence.direction === 'short' && currentPrice > currentEma) {
             filteredOutSignals++;
+            continue;
+          }
+        }
+
+        // Volatility filter
+        if (volFilterEnabled && allAtrs[i] > 0) {
+          const avgSlice = allAtrs.slice(Math.max(0, i - atrAvgWindow + 1), i + 1).filter(v => v > 0);
+          const atrAvg = avgSlice.length > 0 ? avgSlice.reduce((a, b) => a + b, 0) / avgSlice.length : allAtrs[i];
+          if (allAtrs[i] < atrAvg * volFilterMultiplier) {
+            volFilteredSignals++;
             continue;
           }
         }
@@ -132,7 +178,7 @@ export function useRunBacktest() {
       const result = {
         pair,
         period_days: periodDays,
-        params: { leverage, rrRatio, riskPercent, trendFilterEnabled },
+        params: { leverage, rrRatio, riskPercent, trendFilterEnabled, volFilterEnabled, volFilterMultiplier },
         total_trades: trades.length,
         win_rate: trades.length > 0 ? parseFloat(((wins.length / trades.length) * 100).toFixed(1)) : 0,
         total_return: parseFloat(totalReturn.toFixed(2)),
@@ -141,6 +187,9 @@ export function useRunBacktest() {
         max_consec_loss: maxConsecLoss,
         filtered_out_signals: filteredOutSignals,
         trend_filter_active: trendFilterEnabled,
+        vol_filtered_signals: volFilteredSignals,
+        vol_filter_active: volFilterEnabled,
+        atr_series: atrSeries,
       };
 
       // Save to Supabase

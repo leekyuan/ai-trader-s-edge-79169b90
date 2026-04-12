@@ -10,8 +10,8 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { Badge } from '@/components/ui/badge';
 import { AuthModal } from '@/components/trading/AuthModal';
 import { TopBar } from '@/components/trading/TopBar';
-import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from 'recharts';
-import { ArrowLeft, Play, Zap, Filter } from 'lucide-react';
+import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, ReferenceLine, Area, ComposedChart } from 'recharts';
+import { ArrowLeft, Play, Zap, Filter, Activity } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
@@ -28,6 +28,8 @@ export default function Backtest() {
   const [rrRatio, setRrRatio] = useState([2]);
   const [riskPercent, setRiskPercent] = useState([1]);
   const [trendFilter, setTrendFilter] = useState(true);
+  const [volFilter, setVolFilter] = useState(false);
+  const [volMultiplier, setVolMultiplier] = useState([1.0]);
 
   const backtest = useRunBacktest();
   const { setActivePairs } = useBotStore();
@@ -48,7 +50,7 @@ export default function Backtest() {
   }
 
   const run = () => {
-    backtest.mutate({ pair, periodDays: period, leverage: leverage[0], rrRatio: rrRatio[0], riskPercent: riskPercent[0], trendFilterEnabled: trendFilter });
+    backtest.mutate({ pair, periodDays: period, leverage: leverage[0], rrRatio: rrRatio[0], riskPercent: riskPercent[0], trendFilterEnabled: trendFilter, volFilterEnabled: volFilter, volFilterMultiplier: volMultiplier[0] });
   };
 
   const applyToBot = () => {
@@ -128,6 +130,23 @@ export default function Backtest() {
               <Switch checked={trendFilter} onCheckedChange={setTrendFilter} />
             </div>
 
+            {/* Volatility Filter Toggle */}
+            <div className="space-y-2 bg-muted/50 rounded-lg px-3 py-2">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <Activity className="h-3.5 w-3.5 text-orange-400" />
+                  <Label className="text-[11px] font-medium">Avoid Low Volatility (ATR Filter)</Label>
+                </div>
+                <Switch checked={volFilter} onCheckedChange={setVolFilter} />
+              </div>
+              {volFilter && (
+                <div>
+                  <Label className="text-[10px] text-muted-foreground">ATR 임계 배수: {volMultiplier[0].toFixed(1)}x</Label>
+                  <Slider value={volMultiplier} onValueChange={setVolMultiplier} min={0.5} max={2.0} step={0.1} className="mt-1" />
+                </div>
+              )}
+            </div>
+
             <Button className="w-full" onClick={run} disabled={backtest.isPending}>
               {backtest.isPending ? (
                 <div className="flex items-center gap-2"><Skeleton className="h-4 w-4 rounded-full" /> 분석 중...</div>
@@ -141,20 +160,39 @@ export default function Backtest() {
           {result && (
             <div className="space-y-4">
               {/* KPI Cards */}
-              <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
+              <div className="grid grid-cols-2 md:grid-cols-6 gap-3">
                 {[
                   { label: '총 거래수', value: result.total_trades.toString() },
                   { label: '승률', value: `${result.win_rate}%`, color: result.win_rate >= 50 ? 'price-up' : 'price-down' },
                   { label: '총 수익률', value: `${result.total_return >= 0 ? '+' : ''}${result.total_return}%`, color: result.total_return >= 0 ? 'price-up' : 'price-down' },
                   { label: '최대 연속 손실', value: result.max_consec_loss?.toString() || '0' },
-                  ...(result.trend_filter_active ? [{ label: '필터링된 신호', value: result.filtered_out_signals?.toString() || '0', color: 'text-amber-400' }] : []),
+                  ...(result.trend_filter_active ? [{ label: 'EMA 필터링', value: result.filtered_out_signals?.toString() || '0', color: 'text-amber-400' }] : []),
+                  ...(result.vol_filter_active ? [{ label: '변동성 필터링', value: result.vol_filtered_signals?.toString() || '0', color: 'text-orange-400' }] : []),
                 ].map((kpi, i) => (
                   <div key={i} className="bg-card border border-border rounded-lg p-3 text-center">
                     <p className="text-[10px] text-muted-foreground">{kpi.label}</p>
                     <p className={cn('text-lg font-bold font-mono', kpi.color)}>{kpi.value}</p>
                   </div>
                 ))}
-              </div>
+                </div>
+
+              {/* ATR Volatility Chart */}
+              {result.vol_filter_active && result.atr_series && result.atr_series.length > 0 && (
+                <div className="bg-card border border-border rounded-xl p-4">
+                  <h4 className="text-xs font-semibold mb-3">ATR 변동성 레벨</h4>
+                  <ResponsiveContainer width="100%" height={150}>
+                    <ComposedChart data={result.atr_series}>
+                      <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
+                      <XAxis dataKey="date" tick={{ fontSize: 9, fill: 'hsl(var(--muted-foreground))' }} />
+                      <YAxis tick={{ fontSize: 9, fill: 'hsl(var(--muted-foreground))' }} />
+                      <Tooltip contentStyle={{ background: 'hsl(var(--card))', border: '1px solid hsl(var(--border))', borderRadius: 8, fontSize: 11 }} />
+                      <Area type="monotone" dataKey="atr" fill="hsl(25, 95%, 53%, 0.15)" stroke="hsl(25, 95%, 53%)" strokeWidth={1.5} />
+                      <Line type="monotone" dataKey="atrAvg" stroke="hsl(0, 80%, 60%)" strokeWidth={1.5} strokeDasharray="5 3" dot={false} name="Threshold" />
+                    </ComposedChart>
+                  </ResponsiveContainer>
+                  <p className="text-[9px] text-muted-foreground mt-1">주황: ATR(14) / 빨강 점선: 임계값 (20MA × {volMultiplier[0].toFixed(1)}x)</p>
+                </div>
+              )}
 
               {/* Cumulative Chart */}
               {cumulativeData.length > 0 && (
