@@ -8,11 +8,12 @@ import { Slider } from '@/components/ui/slider';
 import { Switch } from '@/components/ui/switch';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Badge } from '@/components/ui/badge';
+import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { AuthModal } from '@/components/trading/AuthModal';
 import { TopBar } from '@/components/trading/TopBar';
-import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, Area, ComposedChart, ReferenceLine } from 'recharts';
-import { ArrowLeft, Play, Zap, Filter, Activity, BarChart3, Layers, Shield, TrendingDown, FlaskConical } from 'lucide-react';
+import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, Area, ComposedChart, ReferenceLine, BarChart, Bar } from 'recharts';
+import { ArrowLeft, Play, Zap, Filter, Activity, BarChart3, Layers, Shield, TrendingDown, FlaskConical, Brain, Clock, AlertTriangle, Target, Gauge } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
@@ -37,6 +38,15 @@ export default function Backtest() {
   const [volumeThreshold, setVolumeThreshold] = useState([1.5]);
   const [mtfFilter, setMtfFilter] = useState(false);
   const [higherTF, setHigherTF] = useState('4h');
+  // Advanced filters
+  const [regimeFilter, setRegimeFilter] = useState(false);
+  const [costFilter, setCostFilter] = useState(false);
+  const [costFilterMax, setCostFilterMax] = useState([30]);
+  const [consecLoss, setConsecLoss] = useState(false);
+  const [consecLossThreshold, setConsecLossThreshold] = useState([3]);
+  const [consecLossReduction, setConsecLossReduction] = useState([50]);
+  const [minQuality, setMinQuality] = useState([0]);
+  const [timeFilter, setTimeFilter] = useState(false);
   // Execution realism
   const [slippageBps, setSlippageBps] = useState([5]);
   const [dynamicSlippage, setDynamicSlippage] = useState(true);
@@ -72,6 +82,14 @@ export default function Backtest() {
       mtfFilterEnabled: mtfFilter, higherTimeframe: higherTF,
       slippageBps: slippageBps[0], dynamicSlippage, makerFeeBps: makerFee[0], takerFeeBps: takerFee[0],
       oosEnabled, oosSplitPct: oosSplit[0],
+      regimeFilterEnabled: regimeFilter,
+      costFilterEnabled: costFilter,
+      costFilterMaxPct: costFilterMax[0],
+      consecLossEnabled: consecLoss,
+      consecLossThreshold: consecLossThreshold[0],
+      consecLossReduction: consecLossReduction[0],
+      minSignalQuality: minQuality[0],
+      timeFilterEnabled: timeFilter,
     };
     backtest.mutate(config);
   };
@@ -96,8 +114,23 @@ export default function Backtest() {
     return acc;
   }, []) || [];
 
-  // Split IS/OOS boundary for chart
   const oosBoundaryIdx = cumulativeData.findIndex((d: any) => d.isOOS);
+
+  const regimeColors: Record<string, string> = {
+    'trend-up': 'text-emerald-400',
+    'trend-down': 'text-red-400',
+    'range': 'text-amber-400',
+    'high-vol': 'text-orange-400',
+    'low-vol': 'text-blue-400',
+  };
+
+  const regimeLabels: Record<string, string> = {
+    'trend-up': '상승추세',
+    'trend-down': '하락추세',
+    'range': '횡보',
+    'high-vol': '고변동',
+    'low-vol': '저변동',
+  };
 
   return (
     <div className="flex flex-col h-screen bg-background overflow-hidden">
@@ -109,7 +142,7 @@ export default function Backtest() {
             <Button variant="ghost" size="sm" onClick={() => navigate('/')}>
               <ArrowLeft className="h-4 w-4" />
             </Button>
-            <h2 className="text-lg font-bold">백테스트 엔진 <Badge variant="outline" className="ml-2 text-[9px]">Production-Grade</Badge></h2>
+            <h2 className="text-lg font-bold">백테스트 엔진 <Badge variant="outline" className="ml-2 text-[9px]">Production-Grade v2</Badge></h2>
           </div>
 
           {/* Input Form */}
@@ -147,9 +180,9 @@ export default function Backtest() {
               </div>
             </div>
 
-            {/* Filters */}
+            {/* Basic Filters */}
             <div className="space-y-2">
-              <p className="text-[10px] text-muted-foreground uppercase tracking-wider font-semibold">필터 설정</p>
+              <p className="text-[10px] text-muted-foreground uppercase tracking-wider font-semibold">기본 필터</p>
 
               <div className="flex items-center justify-between bg-muted/50 rounded-lg px-3 py-2">
                 <div className="flex items-center gap-2">
@@ -179,13 +212,13 @@ export default function Backtest() {
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-2">
                     <BarChart3 className="h-3.5 w-3.5 text-cyan-400" />
-                    <Label className="text-[11px] font-medium">Require Volume Confirmation</Label>
+                    <Label className="text-[11px] font-medium">Volume Confirmation</Label>
                   </div>
                   <Switch checked={volumeFilter} onCheckedChange={setVolumeFilter} />
                 </div>
                 {volumeFilter && (
                   <div>
-                    <Label className="text-[10px] text-muted-foreground">볼륨 임계 배수: {volumeThreshold[0].toFixed(1)}x</Label>
+                    <Label className="text-[10px] text-muted-foreground">볼륨 임계: {volumeThreshold[0].toFixed(1)}x</Label>
                     <Slider value={volumeThreshold} onValueChange={setVolumeThreshold} min={1.0} max={3.0} step={0.1} className="mt-1" />
                   </div>
                 )}
@@ -201,7 +234,7 @@ export default function Backtest() {
                 </div>
                 {mtfFilter && (
                   <div>
-                    <Label className="text-[10px] text-muted-foreground mb-1 block">상위 타임프레임 (50 EMA)</Label>
+                    <Label className="text-[10px] text-muted-foreground mb-1 block">상위 TF (50 EMA)</Label>
                     <Select value={higherTF} onValueChange={setHigherTF}>
                       <SelectTrigger className="h-7 text-[10px]"><SelectValue /></SelectTrigger>
                       <SelectContent>
@@ -215,36 +248,109 @@ export default function Backtest() {
               </div>
             </div>
 
+            {/* Advanced Filters */}
+            <div className="space-y-2">
+              <p className="text-[10px] text-muted-foreground uppercase tracking-wider font-semibold flex items-center gap-1">
+                <Brain className="h-3 w-3" /> 전략 성능 개선 필터
+              </p>
+
+              <div className="flex items-center justify-between bg-muted/50 rounded-lg px-3 py-2">
+                <div className="flex items-center gap-2">
+                  <Gauge className="h-3.5 w-3.5 text-emerald-400" />
+                  <Label className="text-[11px] font-medium">시장 국면 분류기</Label>
+                </div>
+                <Switch checked={regimeFilter} onCheckedChange={setRegimeFilter} />
+              </div>
+
+              <div className="space-y-2 bg-muted/50 rounded-lg px-3 py-2">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <Target className="h-3.5 w-3.5 text-yellow-400" />
+                    <Label className="text-[11px] font-medium">신호 품질 점수 필터</Label>
+                  </div>
+                  <Switch checked={minQuality[0] > 0} onCheckedChange={(v) => setMinQuality(v ? [40] : [0])} />
+                </div>
+                {minQuality[0] > 0 && (
+                  <div>
+                    <Label className="text-[10px] text-muted-foreground">최소 점수: {minQuality[0]}점</Label>
+                    <Slider value={minQuality} onValueChange={setMinQuality} min={10} max={80} step={5} className="mt-1" />
+                  </div>
+                )}
+              </div>
+
+              <div className="flex items-center justify-between bg-muted/50 rounded-lg px-3 py-2">
+                <div className="flex items-center gap-2">
+                  <AlertTriangle className="h-3.5 w-3.5 text-red-400" />
+                  <Label className="text-[11px] font-medium">비용 대비 수익 필터</Label>
+                </div>
+                <Switch checked={costFilter} onCheckedChange={setCostFilter} />
+              </div>
+              {costFilter && (
+                <div className="bg-muted/50 rounded-lg px-3 py-2">
+                  <Label className="text-[10px] text-muted-foreground">최대 비용 비율: {costFilterMax[0]}%</Label>
+                  <Slider value={costFilterMax} onValueChange={setCostFilterMax} min={10} max={80} step={5} className="mt-1" />
+                </div>
+              )}
+
+              <div className="space-y-2 bg-muted/50 rounded-lg px-3 py-2">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <TrendingDown className="h-3.5 w-3.5 text-orange-400" />
+                    <Label className="text-[11px] font-medium">연속 손실 포지션 축소</Label>
+                  </div>
+                  <Switch checked={consecLoss} onCheckedChange={setConsecLoss} />
+                </div>
+                {consecLoss && (
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <Label className="text-[10px] text-muted-foreground">{consecLossThreshold[0]}연패 후</Label>
+                      <Slider value={consecLossThreshold} onValueChange={setConsecLossThreshold} min={2} max={6} step={1} className="mt-1" />
+                    </div>
+                    <div>
+                      <Label className="text-[10px] text-muted-foreground">{consecLossReduction[0]}% 축소</Label>
+                      <Slider value={consecLossReduction} onValueChange={setConsecLossReduction} min={20} max={80} step={10} className="mt-1" />
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              <div className="flex items-center justify-between bg-muted/50 rounded-lg px-3 py-2">
+                <div className="flex items-center gap-2">
+                  <Clock className="h-3.5 w-3.5 text-blue-400" />
+                  <Label className="text-[11px] font-medium">시간대 자동 필터</Label>
+                </div>
+                <Switch checked={timeFilter} onCheckedChange={setTimeFilter} />
+              </div>
+            </div>
+
             {/* Execution Realism */}
             <div className="space-y-2">
               <p className="text-[10px] text-muted-foreground uppercase tracking-wider font-semibold flex items-center gap-1">
                 <Shield className="h-3 w-3" /> 실전 체결 모델
               </p>
-
               <div className="grid grid-cols-2 gap-3 bg-muted/50 rounded-lg px-3 py-2">
                 <div>
-                  <Label className="text-[10px] text-muted-foreground">슬리피지: {slippageBps[0]} bps ({(slippageBps[0] / 100).toFixed(2)}%)</Label>
+                  <Label className="text-[10px] text-muted-foreground">슬리피지: {slippageBps[0]} bps</Label>
                   <Slider value={slippageBps} onValueChange={setSlippageBps} min={0} max={20} step={1} className="mt-1" />
                 </div>
                 <div className="flex items-center justify-between">
-                  <Label className="text-[10px] font-medium">동적 슬리피지 (ATR 기반)</Label>
+                  <Label className="text-[10px] font-medium">동적 슬리피지</Label>
                   <Switch checked={dynamicSlippage} onCheckedChange={setDynamicSlippage} />
                 </div>
               </div>
-
               <div className="grid grid-cols-2 gap-3 bg-muted/50 rounded-lg px-3 py-2">
                 <div>
-                  <Label className="text-[10px] text-muted-foreground">Maker 수수료: {makerFee[0]} bps</Label>
+                  <Label className="text-[10px] text-muted-foreground">Maker: {makerFee[0]} bps</Label>
                   <Slider value={makerFee} onValueChange={setMakerFee} min={0} max={10} step={1} className="mt-1" />
                 </div>
                 <div>
-                  <Label className="text-[10px] text-muted-foreground">Taker 수수료: {takerFee[0]} bps</Label>
+                  <Label className="text-[10px] text-muted-foreground">Taker: {takerFee[0]} bps</Label>
                   <Slider value={takerFee} onValueChange={setTakerFee} min={0} max={10} step={1} className="mt-1" />
                 </div>
               </div>
             </div>
 
-            {/* OOS Validation */}
+            {/* OOS */}
             <div className="space-y-2">
               <div className="flex items-center justify-between bg-muted/50 rounded-lg px-3 py-2">
                 <div className="flex items-center gap-2">
@@ -255,7 +361,7 @@ export default function Backtest() {
               </div>
               {oosEnabled && (
                 <div className="bg-muted/50 rounded-lg px-3 py-2">
-                  <Label className="text-[10px] text-muted-foreground">OOS 비율: {oosSplit[0]}% (마지막 {oosSplit[0]}% 데이터)</Label>
+                  <Label className="text-[10px] text-muted-foreground">OOS 비율: {oosSplit[0]}%</Label>
                   <Slider value={oosSplit} onValueChange={setOosSplit} min={10} max={50} step={5} className="mt-1" />
                 </div>
               )}
@@ -273,13 +379,78 @@ export default function Backtest() {
           {/* Results */}
           {r && (
             <div className="space-y-4">
+              {/* === RANKING TABS === */}
+              <div className="bg-card border-2 border-primary/20 rounded-xl p-4">
+                <h4 className="text-xs font-semibold mb-3 flex items-center gap-1.5">
+                  <Brain className="h-3.5 w-3.5 text-primary" /> 전략 종합 평가
+                </h4>
+                <Tabs defaultValue="return" className="w-full">
+                  <TabsList className="w-full grid grid-cols-3 h-8">
+                    <TabsTrigger value="return" className="text-[10px]">수익률 중심</TabsTrigger>
+                    <TabsTrigger value="stability" className="text-[10px]">안정성 중심</TabsTrigger>
+                    <TabsTrigger value="practical" className="text-[10px]">실전 적합도</TabsTrigger>
+                  </TabsList>
+
+                  <TabsContent value="return">
+                    <div className="flex items-center gap-4 mt-3">
+                      <div className="flex-1">
+                        <div className="flex items-baseline gap-2">
+                          <span className={cn('text-3xl font-black font-mono', r.ranking.returnScore >= 60 ? 'text-emerald-400' : r.ranking.returnScore >= 40 ? 'text-amber-400' : 'text-red-400')}>{r.ranking.returnScore}</span>
+                          <span className="text-xs text-muted-foreground">/ 100</span>
+                        </div>
+                        <p className="text-[10px] text-muted-foreground mt-1">수익률, 기대값, Profit Factor, 승률을 종합</p>
+                      </div>
+                      <div className="text-right space-y-1">
+                        <p className="text-[10px]"><span className="text-muted-foreground">순수익:</span> <span className={cn('font-mono', r.total_return_net >= 0 ? 'text-emerald-400' : 'text-red-400')}>{r.total_return_net}%</span></p>
+                        <p className="text-[10px]"><span className="text-muted-foreground">기대값:</span> <span className="font-mono">{r.expectancy}%</span></p>
+                        <p className="text-[10px]"><span className="text-muted-foreground">PF:</span> <span className="font-mono">{r.profit_factor}</span></p>
+                      </div>
+                    </div>
+                  </TabsContent>
+
+                  <TabsContent value="stability">
+                    <div className="flex items-center gap-4 mt-3">
+                      <div className="flex-1">
+                        <div className="flex items-baseline gap-2">
+                          <span className={cn('text-3xl font-black font-mono', r.ranking.stabilityScore >= 60 ? 'text-emerald-400' : r.ranking.stabilityScore >= 40 ? 'text-amber-400' : 'text-red-400')}>{r.ranking.stabilityScore}</span>
+                          <span className="text-xs text-muted-foreground">/ 100</span>
+                        </div>
+                        <p className="text-[10px] text-muted-foreground mt-1">MDD, Sharpe, 연속손실, OOS 일관성을 종합</p>
+                      </div>
+                      <div className="text-right space-y-1">
+                        <p className="text-[10px]"><span className="text-muted-foreground">MDD:</span> <span className="font-mono text-red-400">{r.max_drawdown}%</span></p>
+                        <p className="text-[10px]"><span className="text-muted-foreground">Sharpe:</span> <span className="font-mono">{r.sharpe_ratio}</span></p>
+                        <p className="text-[10px]"><span className="text-muted-foreground">연속손실:</span> <span className="font-mono">{r.max_consec_loss}</span></p>
+                      </div>
+                    </div>
+                  </TabsContent>
+
+                  <TabsContent value="practical">
+                    <div className="flex items-center gap-4 mt-3">
+                      <div className="flex-1">
+                        <div className="flex items-baseline gap-2">
+                          <span className={cn('text-3xl font-black font-mono', r.ranking.practicalScore >= 60 ? 'text-emerald-400' : r.ranking.practicalScore >= 40 ? 'text-amber-400' : 'text-red-400')}>{r.ranking.practicalScore}</span>
+                          <span className="text-xs text-muted-foreground">/ 100</span>
+                        </div>
+                        <p className="text-[10px] text-muted-foreground mt-1">OOS 수익, 비용 효율, 거래수, MDD를 종합</p>
+                      </div>
+                      <div className="text-right space-y-1">
+                        <p className="text-[10px]"><span className="text-muted-foreground">OOS수익:</span> <span className="font-mono">{r.oos_return_net}%</span></p>
+                        <p className="text-[10px]"><span className="text-muted-foreground">수수료:</span> <span className="font-mono text-amber-400">{r.total_fees}%</span></p>
+                        <p className="text-[10px]"><span className="text-muted-foreground">거래수:</span> <span className="font-mono">{r.total_trades}</span></p>
+                      </div>
+                    </div>
+                  </TabsContent>
+                </Tabs>
+              </div>
+
               {/* Primary KPIs */}
               <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
                 {[
                   { label: '총 거래수', value: r.total_trades.toString() },
                   { label: '승률', value: `${r.win_rate}%`, color: r.win_rate >= 50 ? 'text-emerald-400' : 'text-red-400' },
-                  { label: '순수익률 (수수료 후)', value: `${r.total_return_net >= 0 ? '+' : ''}${r.total_return_net}%`, color: r.total_return_net >= 0 ? 'text-emerald-400' : 'text-red-400' },
-                  { label: '최대 낙폭 (MDD)', value: `${r.max_drawdown}%`, color: 'text-red-400' },
+                  { label: '순수익률', value: `${r.total_return_net >= 0 ? '+' : ''}${r.total_return_net}%`, color: r.total_return_net >= 0 ? 'text-emerald-400' : 'text-red-400' },
+                  { label: 'MDD', value: `${r.max_drawdown}%`, color: 'text-red-400' },
                 ].map((kpi, i) => (
                   <div key={i} className="bg-card border border-border rounded-lg p-3 text-center">
                     <p className="text-[10px] text-muted-foreground">{kpi.label}</p>
@@ -291,12 +462,12 @@ export default function Backtest() {
               {/* Advanced Metrics */}
               <div className="grid grid-cols-3 md:grid-cols-6 gap-2">
                 {[
-                  { label: '기대값/거래', value: `${r.expectancy >= 0 ? '+' : ''}${r.expectancy}%`, color: r.expectancy >= 0 ? 'text-emerald-400' : 'text-red-400' },
-                  { label: 'Profit Factor', value: r.profit_factor.toString(), color: r.profit_factor >= 1.5 ? 'text-emerald-400' : r.profit_factor >= 1 ? 'text-amber-400' : 'text-red-400' },
-                  { label: 'Sharpe Ratio', value: r.sharpe_ratio.toString(), color: r.sharpe_ratio >= 1 ? 'text-emerald-400' : 'text-amber-400' },
-                  { label: '평균 승리', value: `+${r.avg_win}%`, color: 'text-emerald-400' },
-                  { label: '평균 손실', value: `-${r.avg_loss}%`, color: 'text-red-400' },
-                  { label: '최대 연속 손실', value: r.max_consec_loss.toString() },
+                  { label: '기대값', value: `${r.expectancy >= 0 ? '+' : ''}${r.expectancy}%`, color: r.expectancy >= 0 ? 'text-emerald-400' : 'text-red-400' },
+                  { label: 'PF', value: r.profit_factor.toString(), color: r.profit_factor >= 1.5 ? 'text-emerald-400' : r.profit_factor >= 1 ? 'text-amber-400' : 'text-red-400' },
+                  { label: 'Sharpe', value: r.sharpe_ratio.toString(), color: r.sharpe_ratio >= 1 ? 'text-emerald-400' : 'text-amber-400' },
+                  { label: '평균 승', value: `+${r.avg_win}%`, color: 'text-emerald-400' },
+                  { label: '평균 패', value: `-${r.avg_loss}%`, color: 'text-red-400' },
+                  { label: '신호 품질', value: `${r.avg_signal_quality}점`, color: r.avg_signal_quality >= 50 ? 'text-emerald-400' : 'text-amber-400' },
                 ].map((kpi, i) => (
                   <div key={i} className="bg-muted/50 border border-border rounded-lg p-2 text-center">
                     <p className="text-[9px] text-muted-foreground">{kpi.label}</p>
@@ -305,24 +476,28 @@ export default function Backtest() {
                 ))}
               </div>
 
-              {/* Execution Cost Summary */}
-              <div className="grid grid-cols-2 gap-2">
-                <div className="bg-card border border-border rounded-lg p-2 text-center">
-                  <p className="text-[9px] text-muted-foreground">총 수수료 비용</p>
-                  <p className="text-sm font-bold font-mono text-amber-400">{r.total_fees}%</p>
+              {/* Regime Distribution */}
+              {r.regime_distribution && (
+                <div className="bg-card border border-border rounded-xl p-4">
+                  <h4 className="text-xs font-semibold mb-3 flex items-center gap-1.5">
+                    <Gauge className="h-3.5 w-3.5 text-emerald-400" /> 시장 국면 분포
+                  </h4>
+                  <div className="grid grid-cols-5 gap-2">
+                    {Object.entries(r.regime_distribution).map(([regime, count]) => (
+                      <div key={regime} className="text-center">
+                        <p className={cn('text-sm font-bold font-mono', regimeColors[regime])}>{count as number}</p>
+                        <p className="text-[9px] text-muted-foreground">{regimeLabels[regime] || regime}</p>
+                      </div>
+                    ))}
+                  </div>
                 </div>
-                <div className="bg-card border border-border rounded-lg p-2 text-center">
-                  <p className="text-[9px] text-muted-foreground">그로스 → 넷 차이</p>
-                  <p className="text-sm font-bold font-mono text-amber-400">{(r.total_return - r.total_return_net).toFixed(2)}%</p>
-                </div>
-              </div>
+              )}
 
               {/* OOS Comparison */}
               {r.oos_enabled && r.oos_trades > 0 && (
                 <div className="bg-card border-2 border-emerald-500/30 rounded-xl p-4">
                   <h4 className="text-xs font-semibold mb-3 flex items-center gap-1.5">
-                    <FlaskConical className="h-3.5 w-3.5 text-emerald-400" />
-                    In-Sample vs Out-of-Sample 비교
+                    <FlaskConical className="h-3.5 w-3.5 text-emerald-400" /> IS vs OOS 비교
                   </h4>
                   <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
                     <div className="text-center">
@@ -343,66 +518,56 @@ export default function Backtest() {
                     </div>
                   </div>
                   {Math.abs(r.oos_win_rate - r.is_win_rate) >= 15 && (
-                    <p className="text-[10px] text-red-400 mt-2 text-center">⚠️ IS/OOS 승률 차이가 15%p 이상: 과최적화 의심</p>
+                    <p className="text-[10px] text-red-400 mt-2 text-center">⚠️ IS/OOS 승률 차이 15%p 이상: 과최적화 의심</p>
                   )}
                 </div>
               )}
 
               {/* Filter Stats */}
-              {(r.trend_filter_active || r.vol_filter_active || r.volume_filter_active || r.mtf_filter_active) && (
-                <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
-                  {r.trend_filter_active && (
-                    <div className="bg-muted/50 border border-border rounded-lg p-2 text-center">
-                      <p className="text-[9px] text-muted-foreground">EMA 필터링</p>
-                      <p className="text-sm font-bold font-mono text-amber-400">{r.filtered_out_signals}</p>
-                    </div>
-                  )}
-                  {r.vol_filter_active && (
-                    <div className="bg-muted/50 border border-border rounded-lg p-2 text-center">
-                      <p className="text-[9px] text-muted-foreground">변동성 필터링</p>
-                      <p className="text-sm font-bold font-mono text-orange-400">{r.vol_filtered_signals}</p>
-                    </div>
-                  )}
-                  {r.volume_filter_active && (
-                    <div className="bg-muted/50 border border-border rounded-lg p-2 text-center">
-                      <p className="text-[9px] text-muted-foreground">볼륨 필터링</p>
-                      <p className="text-sm font-bold font-mono text-cyan-400">{r.volume_filtered_signals}</p>
-                    </div>
-                  )}
-                  {r.mtf_filter_active && (
-                    <div className="bg-muted/50 border border-border rounded-lg p-2 text-center">
-                      <p className="text-[9px] text-muted-foreground">MTF 필터링</p>
-                      <p className="text-sm font-bold font-mono text-violet-400">{r.mtf_filtered_signals}</p>
-                    </div>
-                  )}
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+                {[
+                  r.trend_filter_active && { label: 'EMA 필터', value: r.filtered_out_signals, color: 'text-amber-400' },
+                  r.vol_filter_active && { label: '변동성 필터', value: r.vol_filtered_signals, color: 'text-orange-400' },
+                  r.volume_filter_active && { label: '볼륨 필터', value: r.volume_filtered_signals, color: 'text-cyan-400' },
+                  r.mtf_filter_active && { label: 'MTF 필터', value: r.mtf_filtered_signals, color: 'text-violet-400' },
+                  r.regime_filtered_signals > 0 && { label: '국면 필터', value: r.regime_filtered_signals, color: 'text-emerald-400' },
+                  r.cost_filtered_signals > 0 && { label: '비용 필터', value: r.cost_filtered_signals, color: 'text-red-400' },
+                  r.quality_filtered_signals > 0 && { label: '품질 필터', value: r.quality_filtered_signals, color: 'text-yellow-400' },
+                  r.time_filtered_signals > 0 && { label: '시간대 필터', value: r.time_filtered_signals, color: 'text-blue-400' },
+                ].filter(Boolean).map((item: any, i) => (
+                  <div key={i} className="bg-muted/50 border border-border rounded-lg p-2 text-center">
+                    <p className="text-[9px] text-muted-foreground">{item.label}</p>
+                    <p className={cn('text-sm font-bold font-mono', item.color)}>{item.value}</p>
+                  </div>
+                ))}
+              </div>
+
+              {/* Time Analysis Chart */}
+              {r.time_analysis && r.time_analysis.length > 0 && (
+                <div className="bg-card border border-border rounded-xl p-4">
+                  <h4 className="text-xs font-semibold mb-3 flex items-center gap-1.5">
+                    <Clock className="h-3.5 w-3.5 text-blue-400" /> 시간대별 성과 분석 (UTC)
+                  </h4>
+                  <ResponsiveContainer width="100%" height={150}>
+                    <BarChart data={r.time_analysis}>
+                      <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
+                      <XAxis dataKey="hour" tick={{ fontSize: 9, fill: 'hsl(var(--muted-foreground))' }} label={{ value: '시(UTC)', position: 'insideBottomRight', offset: -5, fontSize: 9 }} />
+                      <YAxis tick={{ fontSize: 9, fill: 'hsl(var(--muted-foreground))' }} />
+                      <Tooltip
+                        contentStyle={{ background: 'hsl(var(--card))', border: '1px solid hsl(var(--border))', borderRadius: 8, fontSize: 11 }}
+                        formatter={(value: any, name: string) => {
+                          if (name === 'avgPnl') return [`${value}%`, '평균 PnL'];
+                          if (name === 'winRate') return [`${value}%`, '승률'];
+                          return [value, name];
+                        }}
+                      />
+                      <Bar dataKey="avgPnl" name="avgPnl" fill="hsl(var(--primary))" radius={[2, 2, 0, 0]} />
+                    </BarChart>
+                  </ResponsiveContainer>
                 </div>
               )}
 
-              {/* Volume & MTF insight stats */}
-              {(r.volume_filter_active || r.mtf_filter_active) && (
-                <div className="grid grid-cols-2 md:grid-cols-3 gap-2">
-                  {r.volume_filter_active && (
-                    <>
-                      <div className="bg-card border border-border rounded-lg p-2 text-center">
-                        <p className="text-[9px] text-muted-foreground">승리 평균 볼륨 비율</p>
-                        <p className="text-sm font-bold font-mono text-emerald-400">{r.avg_vol_ratio_wins}x</p>
-                      </div>
-                      <div className="bg-card border border-border rounded-lg p-2 text-center">
-                        <p className="text-[9px] text-muted-foreground">패배 평균 볼륨 비율</p>
-                        <p className="text-sm font-bold font-mono text-red-400">{r.avg_vol_ratio_losses}x</p>
-                      </div>
-                    </>
-                  )}
-                  {r.mtf_filter_active && (
-                    <div className="bg-card border border-border rounded-lg p-2 text-center">
-                      <p className="text-[9px] text-muted-foreground">MTF 정렬률</p>
-                      <p className="text-sm font-bold font-mono text-violet-400">{r.mtf_alignment_rate}%</p>
-                    </div>
-                  )}
-                </div>
-              )}
-
-              {/* Cumulative Equity Curve (Gross vs Net) */}
+              {/* Equity Curve */}
               {cumulativeData.length > 0 && (
                 <div className="bg-card border border-border rounded-xl p-4">
                   <h4 className="text-xs font-semibold mb-3">누적 수익 커브 (Gross vs Net)</h4>
@@ -413,7 +578,7 @@ export default function Backtest() {
                       <YAxis tick={{ fontSize: 10, fill: 'hsl(var(--muted-foreground))' }} />
                       <Tooltip contentStyle={{ background: 'hsl(var(--card))', border: '1px solid hsl(var(--border))', borderRadius: 8, fontSize: 12 }} />
                       <Line type="monotone" dataKey="cumulative" stroke="hsl(var(--muted-foreground))" strokeWidth={1} strokeDasharray="4 2" dot={false} name="Gross" />
-                      <Line type="monotone" dataKey="cumulativeNet" stroke={r.trend_filter_active ? 'hsl(150, 80%, 50%)' : 'hsl(var(--primary))'} strokeWidth={2} dot={false} name="Net" />
+                      <Line type="monotone" dataKey="cumulativeNet" stroke="hsl(var(--primary))" strokeWidth={2} dot={false} name="Net" />
                       {oosEnabled && oosBoundaryIdx > 0 && (
                         <ReferenceLine x={cumulativeData[oosBoundaryIdx]?.date} stroke="hsl(150, 80%, 50%)" strokeDasharray="3 3" label={{ value: 'OOS →', fill: 'hsl(150, 80%, 50%)', fontSize: 10 }} />
                       )}
@@ -422,11 +587,11 @@ export default function Backtest() {
                 </div>
               )}
 
-              {/* Drawdown Chart */}
+              {/* Drawdown */}
               {r.drawdown_series && r.drawdown_series.length > 0 && (
                 <div className="bg-card border border-border rounded-xl p-4">
                   <h4 className="text-xs font-semibold mb-3 flex items-center gap-1.5">
-                    <TrendingDown className="h-3.5 w-3.5 text-red-400" /> 낙폭 (Drawdown) 차트
+                    <TrendingDown className="h-3.5 w-3.5 text-red-400" /> 낙폭 차트
                   </h4>
                   <ResponsiveContainer width="100%" height={150}>
                     <ComposedChart data={r.drawdown_series}>
@@ -458,7 +623,7 @@ export default function Backtest() {
                 </div>
               )}
 
-              {/* Trades Table */}
+              {/* Trade Table */}
               <div className="bg-card border border-border rounded-xl overflow-hidden">
                 <div className="px-4 py-2 border-b border-border flex items-center justify-between">
                   <h4 className="text-xs font-semibold">거래 내역</h4>
@@ -470,12 +635,12 @@ export default function Backtest() {
                       <tr>
                         <th className="px-2 py-2 text-left text-muted-foreground font-medium">날짜</th>
                         <th className="px-2 py-2 text-left text-muted-foreground font-medium">방향</th>
-                        <th className="px-2 py-2 text-right text-muted-foreground font-medium">신호가</th>
-                        <th className="px-2 py-2 text-right text-muted-foreground font-medium">체결가</th>
-                        <th className="px-2 py-2 text-right text-muted-foreground font-medium">청산</th>
+                        <th className="px-2 py-2 text-right text-muted-foreground font-medium">체결</th>
                         <th className="px-2 py-2 text-right text-muted-foreground font-medium">Vol×</th>
+                        <th className="px-2 py-2 text-center text-muted-foreground font-medium">국면</th>
+                        <th className="px-2 py-2 text-center text-muted-foreground font-medium">품질</th>
+                        <th className="px-2 py-2 text-right text-muted-foreground font-medium">Scale</th>
                         <th className="px-2 py-2 text-right text-muted-foreground font-medium">Net%</th>
-                        {oosEnabled && <th className="px-2 py-2 text-center text-muted-foreground font-medium">구간</th>}
                       </tr>
                     </thead>
                     <tbody>
@@ -487,20 +652,16 @@ export default function Backtest() {
                               {t.direction.toUpperCase()}
                             </Badge>
                           </td>
-                          <td className="px-2 py-1.5 text-right font-mono text-[10px] text-muted-foreground">{t.signalPrice}</td>
                           <td className="px-2 py-1.5 text-right font-mono text-[10px]">{t.entry}</td>
-                          <td className="px-2 py-1.5 text-right font-mono text-[10px]">{t.exit}</td>
                           <td className={cn('px-2 py-1.5 text-right font-mono text-[10px]', t.vol_ratio >= 1.5 ? 'text-cyan-400' : 'text-muted-foreground')}>{t.vol_ratio}x</td>
+                          <td className="px-2 py-1.5 text-center">
+                            <Badge variant="outline" className={cn('text-[8px]', regimeColors[t.regime])}>{regimeLabels[t.regime]?.slice(0, 2) || t.regime}</Badge>
+                          </td>
+                          <td className={cn('px-2 py-1.5 text-center font-mono text-[10px]', t.signalQuality >= 60 ? 'text-emerald-400' : t.signalQuality >= 40 ? 'text-amber-400' : 'text-muted-foreground')}>{t.signalQuality}</td>
+                          <td className={cn('px-2 py-1.5 text-right font-mono text-[10px]', t.positionScale < 1 ? 'text-orange-400' : 'text-muted-foreground')}>{t.positionScale < 1 ? `${(t.positionScale * 100).toFixed(0)}%` : '100%'}</td>
                           <td className={cn('px-2 py-1.5 text-right font-mono text-[10px] font-semibold', t.pnl_net >= 0 ? 'text-emerald-400' : 'text-red-400')}>
                             {t.pnl_net >= 0 ? '+' : ''}{t.pnl_net}%
                           </td>
-                          {oosEnabled && (
-                            <td className="px-2 py-1.5 text-center">
-                              <Badge variant="outline" className={cn('text-[8px]', t.isOOS ? 'text-emerald-400 border-emerald-500/30' : 'text-muted-foreground')}>
-                                {t.isOOS ? 'OOS' : 'IS'}
-                              </Badge>
-                            </td>
-                          )}
                         </tr>
                       ))}
                     </tbody>
